@@ -1,10 +1,4 @@
 # Surface
-Stub of planning, R^m surface on R^n simulator. (n &gt; m)
-Or, can we choose the original space in R^n / f, f : &partial; D &rightarrow; &partial; D, D subset of R^n with speed?  
-Or, set some glue for &partial; D to &partial; D' analogy like generic lifegame?? Searching...
-
-# Draft
-* initialize some set of potential 0 surfaces.
-* append graph and potential to each surfaces.
-* simulate (with 2^k steps with shortcut on matrix operation, not on vector.).
-* reverse some conditions.
+Stub of planning. First of all, we define field f: f(x in R^n) in R^m as invariant meaning. Then,
+feed g(forall x in exists region) subset R^n. we get recursive on them s.t. A^k \[tan x, tan s\] == 0.
+in the condition tan x = B tan y.
