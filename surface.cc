@@ -29,8 +29,7 @@ int main(int argc, const char* argv[]) {
   for(int i = 0; i < invR.rows(); i ++)
     for(int j = 0; j < invR.cols(); j ++)
       invR(i, j) = v[i * invR.cols() + j + invA.rows() * invA.cols()];
-  Surface<num_t> sim;
-  std::cout << sim.stepk(invA, invR, int(v[v.size() - 1])) << std::endl;
+  std::cout << stepk<num_t>(invA, SimpleMatrix<num_t>(), invR, SimpleMatrix<num_t>(), int(v[v.size() - 1]), SimpleVector<num_t>(3).ek(0)) << std::endl;
   return 0;
 }
 
