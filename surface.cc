@@ -14,24 +14,36 @@ typedef myfloat num_t;
 #include "surface.hh"
 
 int main(int argc, const char* argv[]) {
-  std::vector<num_t> v;
   std::string s;
+  assert(3 < argc);
+  const auto m(std::atoi(argv[1]));
+  const auto n(std::atoi(argv[2]));
+  const auto r(std::atoi(argv[3]));
+  SimpleMatrix<num_t> Ascaled(m, m);
+  SimpleMatrix<num_t> B(m, n);
+  SimpleVector<num_t> x(n);
+  int i = 0;
+  int j = 0;
   while(std::getline(std::cin, s, '\n')) {
     std::stringstream ins(s);
-    v.emplace_back(num_t(0));
-    ins >> v[v.size() - 1];
-    if(4 * 4 + 4 * 4 <= v.size()) break;
+    ins >> Ascaled(i, j ++);
+    if(Ascaled.cols() <= j) { i ++; j ^= j; }
+    if(Ascaled.rows() <= i) break;
   }
-  assert(v.size() == 4 * 4 + 4 * 4);
-  SimpleMatrix<num_t> invA(4, 4);
-  SimpleMatrix<num_t> invR(4, 4);
-  for(int i = 0; i < invA.rows(); i ++)
-    for(int j = 0; j < invA.cols(); j ++)
-      invA(i, j) = v[i * invA.cols() + j];
-  for(int i = 0; i < invR.rows(); i ++)
-    for(int j = 0; j < invR.cols(); j ++)
-      invR(i, j) = v[i * invR.cols() + j + invA.rows() * invA.cols()];
-  std::cout << preparePt<num_t>(SimpleMatrix<num_t>(), invR, SimpleMatrix<num_t>(), SimpleVector<num_t>(3).ek(0)) << std::endl;
+  i = j = 0;
+  while(std::getline(std::cin, s, '\n')) {
+    std::stringstream ins(s);
+    ins >> B(i, j ++);
+    if(B.cols() <= j) { i ++; j ^= j; }
+    if(B.rows() <= i) break;
+  }
+  i ^= i;
+  while(std::getline(std::cin, s, '\n')) {
+    std::stringstream ins(s);
+    ins >> x[i ++];
+    if(x.size() <= i) break;
+  }
+  std::cout << next2k<num_t>(Ascaled, B, x, r) << std::endl;
   return 0;
 }
 
