@@ -388,7 +388,6 @@ template <typename T, int bits> std::ostream& operator << (std::ostream& os, Sig
   return os << dynamic_cast<const T&>(v);
 }
 
-
 // integer to integer float part.
 template <typename T, typename W, int bits, typename U> class SimpleFloat {
 public:
@@ -434,14 +433,14 @@ public:
         s |= safeAdd(e, 1);
         U se(e);
         if(! safeAdd(se, - src.e) && se < U(bits))
-          m += src.m >> int(se);
+          m += se ? src.m >> int(se) : src.m;
       } else
         return *this = src + *this;
     } else {
       if(e > src.e) {
         U se(e);
         if(! safeAdd(se, - src.e) && se < U(bits))
-          m -= src.m >> int(se);
+          m -= se ? src.m >> int(se) : src.m;
       } else if(e == src.e) {
         if(m >= src.m)
           m -= src.m;
@@ -568,7 +567,7 @@ public:
       if(e == src.e) return s_is_minus ? src.m < m : m < src.m;
       return s_is_minus;
     }
-    return !m ? (bool(src.m) && ! s_is_minus) : s_is_minus;
+    return !m ? (! src.m ? m != src.m : ! (src.s & (1 << SIGN))) : s_is_minus;
   }
   inline bool             operator <= (const SimpleFloat<T,W,bits,U>& src) const {
     return *this < src || *this == src;
@@ -690,7 +689,7 @@ private:
     }
     const auto shift(tb - b - 1);
     assert(0 <= shift);
-    src <<= shift;
+    if(shift) src <<= shift;
     return - U(shift);
   }
   inline SimpleFloat<T,W,bits,U>& ensureFlag() {
@@ -1934,7 +1933,9 @@ public:
   inline       SimpleVector<T>  projectionPt(const SimpleVector<T>& other) const;
   inline       SimpleMatrix<T>& fillP(const vector<int>& idx);
   inline       SimpleMatrix<T>  QR() const;
-  inline       SimpleMatrix<T>  SVD() const;
+  inline       SimpleMatrix<T>  SVDleft1d() const;
+  inline       pair<SimpleMatrix<T>, SimpleMatrix<T> > SVD1d() const;
+  inline       SimpleMatrix<T> SVD() const;
   inline       pair<pair<SimpleMatrix<T>, SimpleMatrix<T> >, SimpleMatrix<T> > SVD(const SimpleMatrix<T>& src) const;
   inline       SimpleVector<T>  zeroFix(const SimpleMatrix<T>& A, vector<pair<T, int> > fidx);
   inline       SimpleVector<T>  inner(const SimpleVector<T>& bl, const SimpleVector<T>& bu) const;
@@ -2034,7 +2035,7 @@ template <typename T> inline T SimpleMatrix<T>::determinant(const bool& nonzero)
 }
 
 template <typename T> inline SimpleVector<T> SimpleMatrix<T>::solve(SimpleVector<T> other) const {
-  assert(0 <= entity.size() && 0 <= ecols && entity.size() == ecols && entity.size() == other.size());
+  if(! (0 <= entity.size() && 0 <= ecols && entity.size() == ecols && entity.size() == other.size()) ) throw "SimpleMatrix<T>::Solve error";
   auto work(*this);
   for(int i = 0; i < entity.size(); i ++) {
     int xchg = i;
@@ -2128,7 +2129,7 @@ template <typename T> inline SimpleMatrix<T> SimpleMatrix<T>::QR() const {
   return Q.fillP(residue);
 }
 
-template <typename T> inline SimpleMatrix<T> SimpleMatrix<T>::SVD() const {
+template <typename T> inline SimpleMatrix<T> SimpleMatrix<T>::SVDleft1d() const {
   // N.B. A = QR, (S - lambda I)x = 0 <=> R^t Q^t U = R^-1 Q^t U Lambda
   //        <=> R^t Q^t U Lambda' = R^-1 Q^t U Lambda'^(- 1)
   //      A := R^t, B := Q^t U, C := Lambda'
@@ -2145,7 +2146,7 @@ template <typename T> inline SimpleMatrix<T> SimpleMatrix<T>::SVD() const {
         auto Left(A.inverse() * (SimpleMatrix<T>(A.rows(), A.cols()).I(T(int(2))) + A1t.inverse() * T(int(2))).inverse() * (A + A.transpose().inverse()));
         auto Right(SimpleMatrix<T>(Left.rows(), Left.cols()).O());
   for(int i = 0; i < Right.rows(); i ++)
-    Right(i, i) = A(i, i) * A(i, i) + T(int(1));
+    Right(i, i) = A(i, i) + T(int(1));
   Left  /= sqrt(norm2M(Left));
   Right /= sqrt(norm2M(Right));
   // N.B. now we have B = Left * B * Right.
@@ -2157,6 +2158,32 @@ template <typename T> inline SimpleMatrix<T> SimpleMatrix<T>::SVD() const {
   return (Left * Right).QR() * Qt;
 }
 
+template <typename T> inline pair<SimpleMatrix<T>, SimpleMatrix<T> > SimpleMatrix<T>::SVD1d() const {
+  if(this->rows() < this->cols()) {
+    auto R(this->transpose().SVDleft1d().transpose());
+    return make_pair(((*this) * R).QR(), move(R));
+  }
+  auto L(this->SVDleft1d());
+  return make_pair(move(L), (L * (*this)).transpose().QR().transpose());
+}
+
+// XXX: O(n^4) over all, we need O(n^3) methods they make SVD1d as SVDnd.
+template <typename T> inline SimpleMatrix<T> SimpleMatrix<T>::SVD() const {
+  auto sym((*this) * this->transpose());
+  assert(sym.rows() == sym.cols());
+  auto res(sym);
+  res.I();
+  for(int i = 0; i <= sym.rows() + 1; i ++) {
+    auto svd(sym.SVD1d());
+    sym = (svd.first * sym * svd.second).transpose();
+    if(i & 1)
+      res = svd.second.transpose() * res;
+    else
+      res = move(svd.first) * res;
+  }
+  return move(res);
+}
+
 template <typename T> inline pair<pair<SimpleMatrix<T>, SimpleMatrix<T> >, SimpleMatrix<T> > SimpleMatrix<T>::SVD(const SimpleMatrix<T>& src) const {
   const auto norm2(max(norm2M(*this), norm2M(src)));
   if(! isfinite(norm2)) return *this;
@@ -2166,22 +2193,10 @@ template <typename T> inline pair<pair<SimpleMatrix<T>, SimpleMatrix<T> >, Simpl
   C.setMatrix(0, 0, *this);
   C.setMatrix(this->rows(), 0, src);
   const auto P(C.SVD());
-  SimpleVector<T> d(this->cols());
-        auto Qt(P * C);
-  vector<int> fill;
-  fill.reserve(d.size());
-  for(int i = 0; i < d.size(); i ++) {
-    d[i] = Qt.row(i).dot(Qt.row(i));
-    if(d[i] <= norm2 * epsilon()) {
-      fill.emplace_back(i);
-      d[i] = sqrt(d[i]);
-    } else
-      Qt.row(i) /= (d[i] = sqrt(d[i]));
-  }
-  Qt.fillP(fill);
-  const auto D(P * C * Qt.transpose());
-  SimpleMatrix<T> P1(this->rows(), d.size());
-  SimpleMatrix<T> P2(src.rows(), d.size());
+  const auto Qt(C.transpose().SVD().transpose());
+  const auto D(P.first * C * Qt.transpose());
+  SimpleMatrix<T> P1(this->rows(), this->cols());
+  SimpleMatrix<T> P2(src.rows(), this->cols());
 #if defined(_OPENMP)
 #pragma omp parallel for schedule(static, 1)
 #endif
@@ -2193,19 +2208,9 @@ template <typename T> inline pair<pair<SimpleMatrix<T>, SimpleMatrix<T> >, Simpl
   for(int i = 0; i < P2.rows(); i ++)
     P2.row(i) = P.col(i + P1.rows());
   auto U1(P1.SVD());
-  auto Wt(U1 * P1);
-  fill = vector<int>();
-  fill.reserve(Wt.rows());
-  for(int i = 0; i < Wt.rows(); i ++) {
-    const auto n2(Wt.row(i).dot(Wt.row(i)));
-    if(n2 <= epsilon())
-      fill.emplace_back(i);
-    else
-      Wt.row(i) /= sqrt(n2);
-  }
-  Wt.fillP(fill);
+  auto Wt(P1.transpose().SVD().transpose());
   auto U2(Wt * P2.transpose());
-  fill = vector<int>();
+  vector<int> fill;
   fill.reserve(U2.rows());
   for(int i = 0; i < U2.rows(); i ++) {
     const auto n2(U2.row(i).dot(U2.row(i)));
@@ -2241,16 +2246,17 @@ template <typename T> inline SimpleVector<T> SimpleMatrix<T>::zeroFix(const Simp
   // sort by: |<Q^t(1), q_k>|, we subject to minimize each, to do this,
   //   maximize minimum q_k orthogonality.
   for(int i = 0, idx = 0; i < this->rows() - 1 && idx < fidx.size(); idx ++) {
-    if(T(int(0)) < fidx[idx].first &&
-       fidx[idx].first < sqrt(one.dot(one)) * epsilon()) {
-      *this = Pb;
-      break;
-    }
     const auto& iidx(fidx[idx].second);
     const auto  orth(this->col(iidx));
     const auto  n2(orth.dot(orth));
     if(n2 <= epsilon())
       continue;
+    if(T(int(0)) < fidx[idx].first &&
+       fidx[idx].first < sqrt(one.dot(one)) * epsilon()) {
+      *this = Pb;
+      break;
+    }
+    Pb = *this;
     // N.B. O(mn) can be writed into O(lg m + lg n) in many core cond.
 #if defined(_OPENMP)
 #pragma omp parallel for schedule(static, 1)
@@ -2485,7 +2491,7 @@ template <typename T> static inline SimpleMatrix<T> exp(const SimpleMatrix<T>& m
   auto res(m);
   res.I();
   for( ; p; ) {
-    if(p & myuint(1)) res *= mm;
+    if(bool(p & myuint(int(1)))) res *= mm;
     if(! (p >>= 1)) break;
     mm *= mm;
   }
@@ -2656,7 +2662,7 @@ template <typename T> static inline pair<SimpleVector<T>, T> makeProgramInvarian
 }
 
 template <typename T> static inline T revertProgramInvariant(const pair<T, T>& in) {
-  return max(T(int(0)), min(T(int(2)), abs(in.first * in.second))) - T(int(1));
+  return max(T(int(0)), min(T(int(2)), abs(in.first * in.second) )) - T(int(1));
 }
 
 template <typename T> class idFeeder {
